@@ -6,6 +6,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLEAdvertising.h>
+#include "MyBLECallbacks.h"
 
 #define SCREEN_WIDTH 128     // OLED display width, in pixels
 #define SCREEN_HEIGHT 64     // OLED display height, in pixels
@@ -30,11 +31,11 @@ void IRAM_ATTR switchISR() {
   programOff = true;  // signal the whole program to stop
 }
 
-
 // variables
 boolean started = false;
 String formatSelected = "";
 int prevSpeech[2] = { 0, 0 };
+bool blinkingBlue = false; // led blinking flag
 
 // debate formats
 String formatA = "BP";
@@ -53,7 +54,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(switchPin), switchISR, FALLING);
 
   // serial monitor setup
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial)
     ;
 
@@ -66,20 +67,19 @@ void setup() {
   display.clearDisplay();
 
   // BLE connection setup
-  String uniqueName = "ESP32_" + String(millis() & 0xFFFF);  // last 16 bits of millis
+  String uniqueName = "ESP32_" + String(millis() & 0xFFFF);
   Serial.println("Device Name: " + uniqueName);
-
   BLEDevice::init(uniqueName.c_str());
 
   BLEServer* pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
   BLEService* pService = pServer->createService(SERVICE_UUID);
-  pService->start();
+  pService->start();  
 
+  // advertising prepared, but not started
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->start();
-
-  Serial.println("BLE advertising started!");
+  pAdvertising->stop();
 }
 
 void loop() {
@@ -98,6 +98,9 @@ void timerLogic() {
   started = true;
   Serial.println("timer started");
 
+  landingScreen();
+  landingScreenLogic();
+
   formatSelectionScreen();
   formatSelected = formatSelectionLogic();
   Serial.println(formatSelected);
@@ -110,14 +113,49 @@ void timerLogic() {
   started = false;
 }
 
-// 1: format selection screen
+// 1: landing / bluetooth page
+void landingScreen() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  textPrintln("---------------------");
+  headerPrintln("DebateTime");
+  textPrintln("---------------------");
+  textPrintln("\nPress A to begin");
+  textPrintln("Press B for Bluetooth");
+  display.display();
+}
+
+void landingScreenLogic() {
+  bool bluetoothStarted = false;
+
+  while (true) {
+    if (switchPressed) {
+      turnOff();
+      return;
+    }
+    if (programOff) return;
+
+    if (digitalRead(buttonA) == LOW) {
+      delay(100);
+      return;
+    } else if (digitalRead(buttonB) == LOW && !bluetoothStarted) {
+      BLEDevice::getAdvertising()->start();
+      Serial.println("BLE advertising started from landing screen!");
+      bluetoothStarted = true;
+      blinkingBlue = true;
+    }
+
+    if (bluetoothStarted && blinkingBlue) LEDblink(0, 0, 255);
+  }
+}
+
+// 2: format selection screen
 void formatSelectionScreen() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  textPrintln("");
-  headerPrintln("DebateTime");
-  textPrintln("\nSelect debate format:");
+  textPrintln("---------------------\nSelect debate format:\n---------------------");
   textPrintln("\nA: " + formatA);
   textPrintln("B: " + formatB);
   display.display();
@@ -146,7 +184,8 @@ String formatSelectionLogic() {
   }
 }
 
-// 2: confirmation screen
+
+// 3: confirmation screen
 void confirmationScreen() {
   if (programOff) return;
   display.clearDisplay();
@@ -193,7 +232,7 @@ void confirmationScreen() {
   }
 }
 
-// 3: timer screen
+// 4: timer screen
 void timing() {
   if (programOff) return;
   timerScreen(0, 0);
@@ -295,7 +334,7 @@ void timerScreen(int secs, int mins) {
   display.display();
 }
 
-// 4: speech over screen
+// 5: speech over screen
 void speechComplete() {
   if (programOff) return;
   display.clearDisplay();
@@ -347,18 +386,22 @@ String formatSecs(int secs) {
 // when switched to off
 void turnOff() {
   Serial.println("Switch turned off, exiting loop");
+  programOff = true;  // signals loops to stop
 
+  // reset flags
   started = false;
   switchPressed = false;
-  programOff = true;  // signal loops to stop
+  blinkingBlue = false; 
 
-  setLEDColour(0, 0, 0);
-  display.clearDisplay();
-  display.display();
-
+  // reset variables
   prevSpeech[0] = 0;
   prevSpeech[1] = 0;
   formatSelected = "";
+
+  // reset display
+  setLEDColour(0, 0, 0);
+  display.clearDisplay();
+  display.display();
 }
 
 // clearing screen animation after speech ends
@@ -373,5 +416,28 @@ void waveClearScreen() {
     }
     display.display();  // push the current column clear
     delay(3);
+  }
+}
+
+// non-blocking LED blinking function
+unsigned long previousBlinkMillis = 0;
+bool ledState = false;
+void LEDblink(int red, int green, int blue) {
+  const unsigned long blinkInterval = 300; // milliseconds ON or OFF time
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousBlinkMillis >= blinkInterval) {
+    previousBlinkMillis = currentMillis;
+    ledState = !ledState;
+
+    if (ledState) { // on
+      analogWrite(LEDred, red);
+      analogWrite(LEDgreen, green);
+      analogWrite(LEDblue, blue);
+    } else { // off
+      analogWrite(LEDred, 0);
+      analogWrite(LEDgreen, 0);
+      analogWrite(LEDblue, 0);
+    }
   }
 }
