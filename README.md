@@ -31,19 +31,6 @@ A debate timer system built for Arduino ESP32 with OLED display, RGB LED indicat
 - RGB LED: Pins 9 (Red), 10 (Green), 11 (Blue)
 - Power Switch: Pin 4
 - OLED Display: I2C (SDA/SCL)
-
-## Debate Format Timings
-
-### British Parliamentary (BP)
-- Speech Length: 5:00
-- Protected Time: 0:30 - 4:30 (no POIs)
-- Grace Period: 15 seconds
-
-### World Schools (WS)
-- Speech Length: 8:00
-- Protected Time: 1:00 - 7:00 (no POIs)
-- Grace Period: 15 seconds
-
 ## Usage
 
 1. Turn on the device using the power switch

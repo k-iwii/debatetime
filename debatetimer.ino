@@ -2,11 +2,12 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLEAdvertising.h>
-#include "MyBLECallbacks.h"
+#include <NimBLEDevice.h>
+#include <NimBLEServer.h>
+#include <NimBLEUtils.h>
+#include <NimBLEAdvertising.h>
+#include "BLEConnectionCallbacks.h"
+#include "BLEFormats.h"
 
 #define SCREEN_WIDTH 128     // OLED display width, in pixels
 #define SCREEN_HEIGHT 64     // OLED display height, in pixels
@@ -33,15 +34,21 @@ void IRAM_ATTR switchISR() {
 
 // variables
 boolean started = false;
-String formatSelected = "";
+String selectedFormatName = "";
+int (*selectedFormatTime)[2];
 int prevSpeech[2] = { 0, 0 };
+bool replySpeech = false;
 bool blinkingBlue = false; // led blinking flag
+
+// bluetooth
+BLEServer* pServer;
+BLEAdvertising* pAdvertising;
 
 // debate formats
 String formatA = "BP";
 String formatB = "WS";
-int ATime[4][2] = { { 0, 30 }, { 4, 30 }, { 5, 0 }, { 5, 15 } };  // {protected ends, protected starts, speech ends, grace ends}
-int BTime[4][2] = { { 1, 0 }, { 7, 0 }, { 8, 0 }, { 8, 15 } };    // {protected ends, protected starts, speech ends, grace ends}
+int ATime[5][2] = { { 0, 30 }, { 4, 30 }, { 5, 0 }, { 0, 15 }, {0, 0} };  // {protected ends, protected starts, speech len, grace len, reply len}
+int BTime[5][2] = { { 1, 0 }, { 7, 0 }, { 8, 0 }, { 0, 15 }, {0, 15} };    // {protected ends, protected starts, speech len, grace len, reply len}
 
 void setup() {
   // arduino pin setup
@@ -53,11 +60,6 @@ void setup() {
   pinMode(switchPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(switchPin), switchISR, FALLING);
 
-  // serial monitor setup
-  Serial.begin(115200);
-  while (!Serial)
-    ;
-
   // display setup
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     Serial.println(F("SSD1306 allocation failed"));
@@ -66,20 +68,30 @@ void setup() {
   }
   display.clearDisplay();
 
+  // serial monitor setup
+  Serial.begin(115200);
+  while (!Serial)
+    ;
+
   // BLE connection setup
   String uniqueName = "ESP32_" + String(millis() & 0xFFFF);
   Serial.println("Device Name: " + uniqueName);
   BLEDevice::init(uniqueName.c_str());
 
-  BLEServer* pServer = BLEDevice::createServer();
+  pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService* pService = pServer->createService(SERVICE_UUID);
-  pService->start();  
+  pService->start();
 
   // advertising prepared, but not started
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->stop();
+
+  /*Serial.end();
+  Serial.begin(9600); // FIX THIS SERIAL PROBLEm
+  while (!Serial)
+    ;*/
 }
 
 void loop() {
@@ -96,14 +108,18 @@ void loop() {
 // ------------------------ LOGIC & DISPLAY ------------------------
 void timerLogic() {
   started = true;
-  Serial.println("timer started");
+  reset();
+  //Serial.println("timer started");
 
   landingScreen();
   landingScreenLogic();
 
   formatSelectionScreen();
-  formatSelected = formatSelectionLogic();
-  Serial.println(formatSelected);
+  selectedFormatName = formatSelectionLogic();
+  if (selectedFormatName.equals(formatA))
+    selectedFormatTime = ATime;
+  else
+    selectedFormatTime = BTime;
 
   confirmationScreen();
 
@@ -137,7 +153,24 @@ void landingScreenLogic() {
     if (programOff) return;
 
     if (digitalRead(buttonA) == LOW) {
-      delay(100);
+      delay(300);
+
+      // stop BLE advertising
+      if (bluetoothStarted) {
+        pAdvertising->stop();
+        Serial.println("BLE advertising stopped");
+
+        // disconnect all connected clients
+        if (pServer->getConnectedCount() > 0) {
+          pServer->disconnect(0);  // 0 = first connected device
+          Serial.println("BLE client disconnected by user");
+        }
+
+        bluetoothStarted = false;
+        blinkingBlue = false;
+        setLEDColour(0, 0, 0);
+      }
+
       return;
     } else if (digitalRead(buttonB) == LOW && !bluetoothStarted) {
       BLEDevice::getAdvertising()->start();
@@ -194,25 +227,19 @@ void confirmationScreen() {
   display.setCursor(0, 0);
   display.setTextSize(1);
   display.print(" ");  // helps centre the numbers
-  headerPrintln("    " + formatSelected);
+  headerPrintln("    " + selectedFormatName);
 
   // format info
   textPrintln("");
-  switch (formatSelected.equals(formatA)) {
-    case true:
-      textPrintln("Speech: " + String(ATime[2][0]) + ":" + formatSecs(ATime[2][1]));
-      textPrintln("POIs: " + String(ATime[0][0]) + ":" + formatSecs(ATime[0][1]) + " - " + String(ATime[1][0]) + ":" + formatSecs(ATime[1][1]));
-      textPrintln("Grace: " + formatSecs(ATime[3][1] - ATime[2][1]) + "s");
-      break;
-    case false:
-      textPrintln("Speech: " + String(BTime[2][0]) + ":" + formatSecs(BTime[2][1]));
-      textPrintln("POIs: " + String(BTime[0][0]) + ":" + formatSecs(BTime[0][1]) + " - " + String(BTime[1][0]) + ":" + formatSecs(BTime[1][1]));
-      textPrintln("Grace: " + formatSecs(BTime[3][1] - BTime[2][1]) + "s");
-      break;
-  }
+  textPrintln("Speech: " + String(selectedFormatTime[2][0]) + ":" + formatSecs(selectedFormatTime[2][1]));
+  textPrintln("POIs: " + String(selectedFormatTime[0][0]) + ":" + formatSecs(selectedFormatTime[0][1]) + " - " + String(selectedFormatTime[1][0]) + ":" + formatSecs(selectedFormatTime[1][1]));
+  textPrintln("Grace: " + formatSecs(selectedFormatTime[3][1] - selectedFormatTime[2][1]) + "s");
 
   // instructions
-  textPrintln("\n  Press A to start");
+  if (selectedFormatTime[4][0] == 0 && selectedFormatTime[4][1] == 0)
+    textPrintln("\n  Press A to start");
+  else
+    textPrintln("\nA: Speech || B: Reply");
 
   setLEDColour(255, 100, 100);
   display.display();
@@ -225,7 +252,11 @@ void confirmationScreen() {
     if (programOff) return;
 
     if (digitalRead(buttonA) == LOW) {
-      Serial.println("format A, " + formatA + ", was selected");
+      delay(300);
+      return;
+    }
+    if (digitalRead(buttonB) == LOW && !(selectedFormatTime[4][0] == 0 && selectedFormatTime[4][1] == 0)) {
+      replySpeech = true;
       delay(300);
       return;
     }
@@ -239,13 +270,14 @@ void timing() {
   delay(300);
 
   int protectedSecs[2] = {
-    (formatSelected == formatA) ? (ATime[0][0] * 60 + ATime[0][1]) : (BTime[0][0] * 60 + BTime[0][1]),
-    (formatSelected == formatA) ? (ATime[1][0] * 60 + ATime[1][1]) : (BTime[1][0] * 60 + BTime[1][1])
+    selectedFormatTime[0][0] * 60 + selectedFormatTime[0][1],
+    selectedFormatTime[1][0] * 60 + selectedFormatTime[1][1]
   };
-  int totalSecs = (formatSelected == formatA) ? (ATime[2][0] * 60 + ATime[2][1]) : (BTime[2][0] * 60 + BTime[2][1]);
-  int graceSecs = (formatSelected == formatA) ? (ATime[3][0] * 60 + ATime[3][1]) : (BTime[3][0] * 60 + BTime[3][1]);
 
-  Serial.println("graceSecs: " + graceSecs);
+  int totalSecs = replySpeech ? selectedFormatTime[4][0] * 60 + selectedFormatTime[4][1] : selectedFormatTime[2][0] * 60 + selectedFormatTime[2][1];
+  int graceSecs = totalSecs + (selectedFormatTime[3][0] * 60 + selectedFormatTime[3][1]);
+  Serial.println("graceSecs: " + String(graceSecs));
+  Serial.println("totalSecs: " + String(totalSecs));
 
   unsigned long startTime = millis();
   int elapsedSecs = 0;
@@ -267,14 +299,17 @@ void timing() {
       timerScreen(secs, mins);
 
       if (elapsedSecs <= totalSecs) {
-        if (elapsedSecs <= protectedSecs[0] || elapsedSecs >= protectedSecs[1])  // protected time
-          setLEDColour(200, 255, 0);                                             // light green
-        else                                                                     // speech time
-          setLEDColour(0, 255, 0);                                               // green
-      } else if (elapsedSecs <= graceSecs)                                       // grace time
-        setLEDColour(255, 90, 0);                                                // orange
-      else                                                                       // speech over
-        setLEDColour(255, 0, 0);                                                 // red
+        if (!replySpeech && (elapsedSecs <= protectedSecs[0] || elapsedSecs >= protectedSecs[1]))  // protected time
+          setLEDColour(200, 255, 0);       // light green
+        else                               // speech time
+          setLEDColour(0, 255, 0);         // green
+      } else if (elapsedSecs <= graceSecs) // grace time
+        setLEDColour(255, 90, 0);          // orange
+      else {                                // speech over
+        setLEDColour(255, 0, 0);           // red
+        Serial.println("replySpeech: " + String(replySpeech));
+        Serial.println("elapsedSecs: " + String(elapsedSecs));
+      }
     }
 
     // check for button presses while the timer is running
@@ -284,7 +319,7 @@ void timing() {
 
       // pause until A is pressed again
       while (true) {
-        if (switchPressed) {
+        if (switchPressed) { 
           turnOff();
           return;
         }
@@ -388,6 +423,15 @@ void turnOff() {
   Serial.println("Switch turned off, exiting loop");
   programOff = true;  // signals loops to stop
 
+  reset();
+
+  // reset display
+  setLEDColour(0, 0, 0);
+  display.clearDisplay();
+  display.display();
+}
+
+void reset() {
   // reset flags
   started = false;
   switchPressed = false;
@@ -396,12 +440,9 @@ void turnOff() {
   // reset variables
   prevSpeech[0] = 0;
   prevSpeech[1] = 0;
-  formatSelected = "";
-
-  // reset display
-  setLEDColour(0, 0, 0);
-  display.clearDisplay();
-  display.display();
+  selectedFormatName = "";
+  selectedFormatTime = nullptr;
+  replySpeech = false;
 }
 
 // clearing screen animation after speech ends
