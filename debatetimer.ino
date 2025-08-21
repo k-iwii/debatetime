@@ -39,25 +39,31 @@ String selectedFormatName = "";
 int (*selectedFormatTime)[2];
 int prevSpeech[2] = { 0, 0 };
 bool replySpeech = false;
+
+// BLE-related variables
+bool bleDataReceived = false;
 bool blinkingBlue = false; // led blinking flag
 bool isStopwatch = true;
-
-// BLE received data
-bool bleDataReceived = false;
 String bleFormatA = "";
 String bleFormatB = "";
 int bleATime[5][2];
 int bleBTime[5][2];
 
+// Chunked data reception variables
+bool receivingChunkedData = false;
+String jsonBuffer = "";
+const int MAX_JSON_SIZE = 2048;
+
 // bluetooth
 BLEServer* pServer;
 BLEAdvertising* pAdvertising;
 
-// debate formats
-String formatA = "BP";
-String formatB = "WS";
+// default settings
+String formatA = "BP"; // high school (5 minute speeches) british parliamentary
+String formatB = "WS"; // world schools
 int ATime[5][2] = { { 0, 30 }, { 4, 30 }, { 5, 0 }, { 0, 15 }, {0, 0} };  // {protected ends, protected starts, speech len, grace len, reply len}
 int BTime[5][2] = { { 1, 0 }, { 7, 0 }, { 8, 0 }, { 0, 15 }, {0, 15} };    // {protected ends, protected starts, speech len, grace len, reply len}
+int colours[4][3] = { {200, 255, 0}, {0, 255, 0}, {255, 90, 0}, {255, 0, 0} }; // protected (light green), speech (green), grace (yellow), ended (red)
 
 void setup() {
   // arduino pin setup
@@ -348,14 +354,14 @@ void timing() {
       timingScreen(secs, mins);
 
       if (elapsedSecs <= totalSecs) {
-        if (!replySpeech && (elapsedSecs <= protectedSecs[0] || elapsedSecs >= protectedSecs[1]))  // protected time
-          setLEDColour(200, 255, 0);       // light green
-        else                               // speech time
-          setLEDColour(0, 255, 0);         // green
-      } else if (elapsedSecs <= graceSecs) // grace time
-        setLEDColour(255, 90, 0);          // orange
-      else                                 // speech over
-        setLEDColour(255, 0, 0);           // red
+        if (!replySpeech && (elapsedSecs <= protectedSecs[0] || elapsedSecs >= protectedSecs[1]))
+          setLEDColour(colours[0][0], colours[0][1], colours[0][2]);       // protectedColour
+        else
+          setLEDColour(colours[1][0], colours[1][1], colours[1][2]);        // speechColour
+      } else if (elapsedSecs <= graceSecs)
+        setLEDColour(colours[2][0], colours[2][1], colours[2][2]);         // graceColour
+      else
+        setLEDColour(colours[3][0], colours[3][1], colours[3][2]);         // speechOverColour
     }
 
     // check for button presses while the timer is running
@@ -467,7 +473,7 @@ void setLEDColour(int red, int green, int blue) {
   analogWrite(LEDred, red);
   analogWrite(LEDgreen, green);
   analogWrite(LEDblue, blue);
-  Serial.println("colour set to " + String(red) + "," + String(green) + "," + String(blue));
+  //Serial.println("colour set to " + String(red) + "," + String(green) + "," + String(blue));
 }
 
 String formatSecs(int secs) {
@@ -499,6 +505,10 @@ void reset() {
   selectedFormatName = "";
   selectedFormatTime = nullptr;
   replySpeech = false;
+  
+  // Reset chunked data reception state
+  receivingChunkedData = false;
+  jsonBuffer = "";
   
   // Reset isStopwatch to default (false) only if no BLE data is received
   if (!bleDataReceived) {

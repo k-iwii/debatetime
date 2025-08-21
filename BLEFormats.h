@@ -10,6 +10,10 @@ extern String bleFormatB;
 extern int bleATime[5][2];
 extern int bleBTime[5][2];
 extern bool isStopwatch;
+extern int colours[4][3];
+extern bool receivingChunkedData;
+extern String jsonBuffer;
+extern const int MAX_JSON_SIZE;
 extern const char* CHAR_DATA_UUID;
 
 class MyReceiveCallbacks : public NimBLECharacteristicCallbacks {
@@ -18,11 +22,54 @@ class MyReceiveCallbacks : public NimBLECharacteristicCallbacks {
     std::string uuid = pCharacteristic->getUUID().toString();
     
     if (uuid == CHAR_DATA_UUID) {
-      Serial.println("Received JSON data from Flutter app:");
-      Serial.println(value.c_str());
+      String receivedData = String(value.c_str());
       
-      // Parse the JSON-like data from Flutter app
-      parseFlutterData(String(value.c_str()));
+      // Check for start marker
+      if (receivedData == "START_JSON") {
+        Serial.println("Received START_JSON marker - beginning chunked data reception");
+        receivingChunkedData = true;
+        jsonBuffer = "";
+        return;
+      }
+      
+      // Check for end marker
+      if (receivedData == "END_JSON") {
+        Serial.println("Received END_JSON marker - processing complete JSON");
+        receivingChunkedData = false;
+        
+        if (jsonBuffer.length() > 0) {
+          Serial.println("Complete JSON data received:");
+          Serial.println(jsonBuffer);
+          
+          // Parse the complete JSON data
+          parseFlutterData(jsonBuffer);
+          bleDataReceived = true;
+          
+          // Clear buffer
+          jsonBuffer = "";
+        } else {
+          Serial.println("Error: No data in buffer when END_JSON received");
+        }
+        return;
+      }
+      
+      // Handle chunk data
+      if (receivingChunkedData) {
+        if (jsonBuffer.length() + receivedData.length() <= MAX_JSON_SIZE) {
+          jsonBuffer += receivedData;
+          Serial.println("Received chunk: " + String(receivedData.length()) + " bytes, total: " + String(jsonBuffer.length()) + " bytes");
+        } else {
+          Serial.println("Error: JSON buffer overflow, discarding chunk");
+          receivingChunkedData = false;
+          jsonBuffer = "";
+        }
+        return;
+      }
+      
+      // Handle single message (backward compatibility)
+      Serial.println("Received single JSON message from Flutter app:");
+      Serial.println(receivedData);
+      parseFlutterData(receivedData);
       bleDataReceived = true;
     }
   }
@@ -33,57 +80,54 @@ private:
     // Expected format: {"formatA": {"shortName": "BP", "timings": [[0,30],[4,30],[5,0],[5,15],[0,0]]}, "formatB": {...}, "isStopwatch": true}
     
     Serial.println("Parsing new structured JSON...");
+    Serial.print("Free heap: ");
+    Serial.println(ESP.getFreeHeap());
     
-    // Parse Format A
+    // debate format
     if (parseFormat(jsonData, "formatA", bleFormatA, bleATime)) {
       Serial.println("Successfully parsed Format A: " + bleFormatA);
       printTimings("Format A", bleATime);
     }
-    
-    // Parse Format B  
     if (parseFormat(jsonData, "formatB", bleFormatB, bleBTime)) {
       Serial.println("Successfully parsed Format B: " + bleFormatB);
       printTimings("Format B", bleBTime);
     }
     
-    // Parse isStopwatch
+    // timer format
     parseIsStopwatch(jsonData);
+    
+    // led colours
+    parseColours(jsonData);
   }
+
+  // debate format
   
   bool parseFormat(String jsonData, String formatKey, String &formatName, int timings[5][2]) {
-    // Find the format section: "formatA": { or "formatB": {
     String searchKey = "\"" + formatKey + "\":";
     int formatStart = jsonData.indexOf(searchKey);
-    Serial.println("formatStart: " + String(formatStart));
     if (formatStart == -1) return false;
     
     // Find the opening brace of this format
     int braceStart = jsonData.indexOf("{", formatStart);
-    Serial.println("braceStart: " + String(braceStart));
     if (braceStart == -1) return false;
     
     // Find the closing brace (simple approach - find next })
     int braceEnd = jsonData.indexOf("}", braceStart);
-    Serial.println("braceEnd: " + String(braceEnd));
     if (braceEnd == -1) return false;
     
     String formatSection = jsonData.substring(braceStart + 1, braceEnd);
-    Serial.println("formatSection: " + formatSection);
     
     // Extract shortName
     int nameStart = formatSection.indexOf("\"shortName\":\"") + 13;
     int nameEnd = formatSection.indexOf("\"", nameStart);
-    if (nameStart > 12 && nameEnd > nameStart) {
+    if (nameStart > 12 && nameEnd > nameStart)
       formatName = formatSection.substring(nameStart, nameEnd);
-      Serial.println("formatName: " + formatName);
-    }
     
     // Extract timings array
     int timingsStart = formatSection.indexOf("\"timings\":[") + 11;
     int timingsEnd = formatSection.indexOf("]]", timingsStart) + 1;
     if (timingsStart > 10 && timingsEnd > timingsStart) {
       String timingsStr = formatSection.substring(timingsStart, timingsEnd);
-      Serial.println("timingsStr: " + timingsStr);
       return parseTimingsArray(timingsStr, timings);
     }
     
@@ -95,19 +139,14 @@ private:
     int pos = 0;
     
     while (currentTiming < 5 && pos < timingsStr.length()) {
-      // Find opening bracket
       int openBracket = timingsStr.indexOf("[", pos);
-      Serial.println("openBracket: " + String(openBracket));
       if (openBracket == -1) break;
       
-      // Find closing bracket
       int closeBracket = timingsStr.indexOf("]", openBracket);
-      Serial.println("closeBracket: " + String(closeBracket));
       if (closeBracket == -1) break;
       
-      // Extract the pair like "0,30"
+      // extract the pair 
       String pair = timingsStr.substring(openBracket + 1, closeBracket);
-      Serial.println("pair: " + pair);
       int commaPos = pair.indexOf(",");
       if (commaPos > 0) {
         timings[currentTiming][0] = pair.substring(0, commaPos).toInt();
@@ -118,7 +157,7 @@ private:
       pos = closeBracket + 1;
     }
     
-    return currentTiming == 5;  // Success if we parsed all 5 timing pairs
+    return currentTiming == 5;  // success if we parsed all 5 timing pairs
   }
   
   void printTimings(String formatName, int timings[5][2]) {
@@ -134,6 +173,8 @@ private:
     return (secs < 10) ? ("0" + String(secs)) : String(secs);
   }
   
+  // stopwatch
+
   void parseIsStopwatch(String jsonData) {
     String searchKey = "\"isStopwatch\":";
     int keyStart = jsonData.indexOf(searchKey);
@@ -156,8 +197,90 @@ private:
     } else
       Serial.println("isStopwatch field not found in JSON");
   }
-};
 
+  // colours
+  
+  void parseColours(String jsonData) {
+    String colourKeys[4] = {"protectedColour", "speechColour", "graceColour", "speechOverColour"};
+    
+    for (int i = 0; i < 4; i++) {
+      parseColourFromJSON(jsonData, colourKeys[i], i);
+    }
+  }
+  
+  void parseColourFromJSON(String jsonData, String colourKey, int colourIndex) {
+    String searchKey = "\"" + colourKey + "\":";
+    int keyStart = jsonData.indexOf(searchKey);
+    if (keyStart == -1) {
+      Serial.print("Colour key not found: ");
+      Serial.println(colourKey);
+      return;
+    }
+    
+    int braceStart = jsonData.indexOf("{", keyStart);
+    if (braceStart == -1) {
+      Serial.println("Opening brace not found");
+      return;
+    }
+    
+    int braceEnd = jsonData.indexOf("}", braceStart);
+    if (braceEnd == -1) {
+      Serial.println("Closing brace not found");
+      return;
+    }
+    
+    colours[colourIndex][0] = parseColourValueDirect(jsonData, braceStart, braceEnd, "r");
+    colours[colourIndex][1] = parseColourValueDirect(jsonData, braceStart, braceEnd, "g");
+    colours[colourIndex][2] = parseColourValueDirect(jsonData, braceStart, braceEnd, "b");
+    
+    Serial.print(colourKey);
+    Serial.print(" parsed: R=");
+    Serial.print(colours[colourIndex][0]);
+    Serial.print(" G=");
+    Serial.print(colours[colourIndex][1]);
+    Serial.print(" B=");
+    Serial.println(colours[colourIndex][2]);
+  }
+  
+  int parseColourValueDirect(String jsonData, int startPos, int endPos, String component) {
+    // Search for "component": within the specified range
+    String searchKey = "\"" + component + "\":";
+    int searchStart = startPos;
+    int keyStart = -1;
+    
+    // Find the key within the range
+    while (searchStart <= endPos - searchKey.length()) {
+      keyStart = jsonData.indexOf(searchKey, searchStart);
+      if (keyStart == -1 || keyStart > endPos) break;
+      searchStart = keyStart + 1;
+      if (keyStart < endPos) break;
+    }
+    
+    if (keyStart == -1 || keyStart > endPos) return 0;
+    
+    int valueStart = keyStart + searchKey.length();
+    int valueEnd = jsonData.indexOf(",", valueStart);
+    if (valueEnd == -1 || valueEnd > endPos) {
+      valueEnd = jsonData.indexOf("}", valueStart);
+      if (valueEnd == -1 || valueEnd > endPos) valueEnd = endPos;
+    }
+    
+    // Extract number directly without creating substring
+    int value = 0;
+    bool foundDigit = false;
+    for (int i = valueStart; i < valueEnd; i++) {
+      char c = jsonData.charAt(i);
+      if (c >= '0' && c <= '9') {
+        value = value * 10 + (c - '0');
+        foundDigit = true;
+      } else if (foundDigit) {
+        break; // Stop at first non-digit after finding digits
+      }
+    }
+    
+    return value;
+  }
+};
 
 
 #endif
