@@ -17,7 +17,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define NUMFLAKES 10  // Number of snowflakes in the animation example
 #define LOGO_HEIGHT 16
 #define LOGO_WIDTH 16
-#define SERVICE_UUID "d4b24792-2610-4be4-97fa-945af5cf144e"  // change this
+#define SERVICE_UUID "d4b24792-2610-4be4-97fa-945af5cf144e"  
+const char* CHAR_DATA_UUID = "d4b24793-2610-4be4-97fa-945af5cf144e";  // Single characteristic for Flutter app
 
 // input pins; all digital
 int buttonA = 5, buttonB = 6;
@@ -39,6 +40,13 @@ int (*selectedFormatTime)[2];
 int prevSpeech[2] = { 0, 0 };
 bool replySpeech = false;
 bool blinkingBlue = false; // led blinking flag
+
+// BLE received data
+bool bleDataReceived = false;
+String bleFormatA = "";
+String bleFormatB = "";
+int bleATime[5][2];
+int bleBTime[5][2];
 
 // bluetooth
 BLEServer* pServer;
@@ -81,6 +89,15 @@ void setup() {
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  // Create single characteristic for Flutter app compatibility
+  NimBLECharacteristic* pCharData = pService->createCharacteristic(CHAR_DATA_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+  pCharData->setValue("ready");
+
+  // Set callback
+  MyReceiveCallbacks* callbacks = new MyReceiveCallbacks();
+  pCharData->setCallbacks(callbacks);
+
   pService->start();
 
   // advertising prepared, but not started
@@ -116,10 +133,19 @@ void timerLogic() {
 
   formatSelectionScreen();
   selectedFormatName = formatSelectionLogic();
-  if (selectedFormatName.equals(formatA))
-    selectedFormatTime = ATime;
-  else
-    selectedFormatTime = BTime;
+  
+  // Set selectedFormatTime based on BLE data or defaults
+  if (bleDataReceived) {
+    if (selectedFormatName.equals(bleFormatA))
+      selectedFormatTime = bleATime;
+    else
+      selectedFormatTime = bleBTime;
+  } else {
+    if (selectedFormatName.equals(formatA))
+      selectedFormatTime = ATime;
+    else
+      selectedFormatTime = BTime;
+  }
 
   confirmationScreen();
 
@@ -161,7 +187,7 @@ void landingScreenLogic() {
         Serial.println("BLE advertising stopped");
 
         // disconnect all connected clients
-        if (pServer->getConnectedCount() > 0) {
+        if (pServer->getConnectedCount( ) > 0) {
           pServer->disconnect(0);  // 0 = first connected device
           Serial.println("BLE client disconnected by user");
         }
@@ -174,6 +200,7 @@ void landingScreenLogic() {
       return;
     } else if (digitalRead(buttonB) == LOW && !bluetoothStarted) {
       BLEDevice::getAdvertising()->start();
+      delay(100);
       Serial.println("BLE advertising started from landing screen!");
       bluetoothStarted = true;
       blinkingBlue = true;
@@ -185,12 +212,16 @@ void landingScreenLogic() {
 
 // 2: format selection screen
 void formatSelectionScreen() {
+  // Use BLE data if available, otherwise use defaults
+  String displayFormatA = bleDataReceived ? bleFormatA : formatA;
+  String displayFormatB = bleDataReceived ? bleFormatB : formatB;
+  
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   textPrintln("---------------------\nSelect debate format:\n---------------------");
-  textPrintln("\nA: " + formatA);
-  textPrintln("B: " + formatB);
+  textPrintln("\nA: " + displayFormatA);
+  textPrintln("B: " + displayFormatB);
   display.display();
   Serial.println("displayed format selection screen");
 
@@ -206,13 +237,15 @@ String formatSelectionLogic() {
     if (programOff) return "";
 
     if (digitalRead(buttonA) == LOW) {
-      Serial.println("format A, " + formatA + ", was selected");
+      String selectedFormat = bleDataReceived ? bleFormatA : formatA;
+      Serial.println("format A, " + selectedFormat + ", was selected");
       delay(300);
-      return formatA;
+      return selectedFormat;
     } else if (digitalRead(buttonB) == LOW) {
-      Serial.println("format B, " + formatB + ", was selected");
+      String selectedFormat = bleDataReceived ? bleFormatB : formatB;
+      Serial.println("format B, " + selectedFormat + ", was selected");
       delay(300);
-      return formatB;
+      return selectedFormat;
     }
   }
 }
@@ -305,11 +338,8 @@ void timing() {
           setLEDColour(0, 255, 0);         // green
       } else if (elapsedSecs <= graceSecs) // grace time
         setLEDColour(255, 90, 0);          // orange
-      else {                                // speech over
+      else                                 // speech over
         setLEDColour(255, 0, 0);           // red
-        Serial.println("replySpeech: " + String(replySpeech));
-        Serial.println("elapsedSecs: " + String(elapsedSecs));
-      }
     }
 
     // check for button presses while the timer is running
@@ -343,7 +373,7 @@ void timing() {
     }
 
     if (digitalRead(buttonB) == LOW) {
-      Serial.println("End speech early");
+      Serial.println("End speech");
       prevSpeech[0] = elapsedSecs / 60;
       prevSpeech[1] = elapsedSecs % 60;
       break;
