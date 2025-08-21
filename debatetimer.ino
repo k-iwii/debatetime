@@ -136,6 +136,7 @@ void timerLogic() {
   
   // Set selectedFormatTime based on BLE data or defaults
   if (bleDataReceived) {
+    Serial.println("selectedFormatTime will be based on ble");
     if (selectedFormatName.equals(bleFormatA))
       selectedFormatTime = bleATime;
     else
@@ -179,6 +180,7 @@ void landingScreenLogic() {
     if (programOff) return;
 
     if (digitalRead(buttonA) == LOW) {
+      Serial.println("A pressed on landing screen");
       delay(300);
 
       // stop BLE advertising
@@ -306,6 +308,8 @@ void timing() {
     selectedFormatTime[0][0] * 60 + selectedFormatTime[0][1],
     selectedFormatTime[1][0] * 60 + selectedFormatTime[1][1]
   };
+  Serial.println("protectedSecs: " + String(protectedSecs[0]) + " " + String(protectedSecs[1]));
+  Serial.println("replySpeech: " + String(replySpeech));
 
   int totalSecs = replySpeech ? selectedFormatTime[4][0] * 60 + selectedFormatTime[4][1] : selectedFormatTime[2][0] * 60 + selectedFormatTime[2][1];
   int graceSecs = totalSecs + (selectedFormatTime[3][0] * 60 + selectedFormatTime[3][1]);

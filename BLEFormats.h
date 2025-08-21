@@ -50,30 +50,36 @@ private:
     // Find the format section: "formatA": { or "formatB": {
     String searchKey = "\"" + formatKey + "\":";
     int formatStart = jsonData.indexOf(searchKey);
+    Serial.println("formatStart: " + String(formatStart));
     if (formatStart == -1) return false;
     
     // Find the opening brace of this format
     int braceStart = jsonData.indexOf("{", formatStart);
+    Serial.println("braceStart: " + String(braceStart));
     if (braceStart == -1) return false;
     
     // Find the closing brace (simple approach - find next })
     int braceEnd = jsonData.indexOf("}", braceStart);
+    Serial.println("braceEnd: " + String(braceEnd));
     if (braceEnd == -1) return false;
     
     String formatSection = jsonData.substring(braceStart + 1, braceEnd);
+    Serial.println("formatSection: " + formatSection);
     
     // Extract shortName
     int nameStart = formatSection.indexOf("\"shortName\":\"") + 13;
     int nameEnd = formatSection.indexOf("\"", nameStart);
     if (nameStart > 12 && nameEnd > nameStart) {
       formatName = formatSection.substring(nameStart, nameEnd);
+      Serial.println("formatName: " + formatName);
     }
     
     // Extract timings array
     int timingsStart = formatSection.indexOf("\"timings\":[") + 11;
-    int timingsEnd = formatSection.indexOf("]", timingsStart);
+    int timingsEnd = formatSection.indexOf("]]", timingsStart) + 1;
     if (timingsStart > 10 && timingsEnd > timingsStart) {
       String timingsStr = formatSection.substring(timingsStart, timingsEnd);
+      Serial.println("timingsStr: " + timingsStr);
       return parseTimingsArray(timingsStr, timings);
     }
     
@@ -87,14 +93,17 @@ private:
     while (currentTiming < 5 && pos < timingsStr.length()) {
       // Find opening bracket
       int openBracket = timingsStr.indexOf("[", pos);
+      Serial.println("openBracket: " + String(openBracket));
       if (openBracket == -1) break;
       
       // Find closing bracket
       int closeBracket = timingsStr.indexOf("]", openBracket);
+      Serial.println("closeBracket: " + String(closeBracket));
       if (closeBracket == -1) break;
       
       // Extract the pair like "0,30"
       String pair = timingsStr.substring(openBracket + 1, closeBracket);
+      Serial.println("pair: " + pair);
       int commaPos = pair.indexOf(",");
       if (commaPos > 0) {
         timings[currentTiming][0] = pair.substring(0, commaPos).toInt();
