@@ -40,6 +40,7 @@ int (*selectedFormatTime)[2];
 int prevSpeech[2] = { 0, 0 };
 bool replySpeech = false;
 bool blinkingBlue = false; // led blinking flag
+bool isStopwatch = true;
 
 // BLE received data
 bool bleDataReceived = false;
@@ -316,20 +317,16 @@ void confirmationScreen() {
 // 4: timer screen
 void timing() {
   if (programOff) return;
-  timerScreen(0, 0);
+  timingScreen(0, 0);
   delay(300);
 
   int protectedSecs[2] = {
     selectedFormatTime[0][0] * 60 + selectedFormatTime[0][1],
     selectedFormatTime[1][0] * 60 + selectedFormatTime[1][1]
   };
-  Serial.println("protectedSecs: " + String(protectedSecs[0]) + " " + String(protectedSecs[1]));
-  Serial.println("replySpeech: " + String(replySpeech));
 
   int totalSecs = replySpeech ? selectedFormatTime[4][0] * 60 + selectedFormatTime[4][1] : selectedFormatTime[2][0] * 60 + selectedFormatTime[2][1];
   int graceSecs = totalSecs + (selectedFormatTime[3][0] * 60 + selectedFormatTime[3][1]);
-  Serial.println("graceSecs: " + String(graceSecs));
-  Serial.println("totalSecs: " + String(totalSecs));
 
   unsigned long startTime = millis();
   int elapsedSecs = 0;
@@ -348,7 +345,7 @@ void timing() {
 
       int mins = elapsedSecs / 60;
       int secs = elapsedSecs % 60;
-      timerScreen(secs, mins);
+      timingScreen(secs, mins);
 
       if (elapsedSecs <= totalSecs) {
         if (!replySpeech && (elapsedSecs <= protectedSecs[0] || elapsedSecs >= protectedSecs[1]))  // protected time
@@ -403,13 +400,23 @@ void timing() {
   waveClearScreen();
 }
 
-void timerScreen(int secs, int mins) {
+void timingScreen(int secs, int mins) {
   display.clearDisplay();
 
   display.setCursor(0, 0);
   textPrintln("\n  -----------------");  // upper border
   display.print(" ");                    //helps centre the numbers
-  headerPrintln("   " + String(mins) + ":" + formatSecs(secs));
+
+  if (isStopwatch)
+    headerPrintln("   " + String(mins) + ":" + formatSecs(secs));
+  else {
+    int countdownMins = selectedFormatTime[2][0] - mins - 1;
+    if (countdownMins >= 0)
+      headerPrintln("   " + String(countdownMins) + ":" + formatSecs(59 - secs));
+    else
+      headerPrintln("   0:00");
+  }
+
   textPrintln("  -----------------");  // lower border
 
   textPrintln("\nA: Pause/play");
@@ -492,6 +499,11 @@ void reset() {
   selectedFormatName = "";
   selectedFormatTime = nullptr;
   replySpeech = false;
+  
+  // Reset isStopwatch to default (false) only if no BLE data is received
+  if (!bleDataReceived) {
+    isStopwatch = true;
+  }
 }
 
 // clearing screen animation after speech ends

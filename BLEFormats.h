@@ -9,6 +9,7 @@ extern String bleFormatA;
 extern String bleFormatB;
 extern int bleATime[5][2];
 extern int bleBTime[5][2];
+extern bool isStopwatch;
 extern const char* CHAR_DATA_UUID;
 
 class MyReceiveCallbacks : public NimBLECharacteristicCallbacks {
@@ -29,7 +30,7 @@ class MyReceiveCallbacks : public NimBLECharacteristicCallbacks {
 private:
   void parseFlutterData(String jsonData) {
     // Parse new structured JSON from Flutter app
-    // Expected format: {"formatA": {"shortName": "BP", "timings": [[0,30],[4,30],[5,0],[5,15],[0,0]]}, "formatB": {...}}
+    // Expected format: {"formatA": {"shortName": "BP", "timings": [[0,30],[4,30],[5,0],[5,15],[0,0]]}, "formatB": {...}, "isStopwatch": true}
     
     Serial.println("Parsing new structured JSON...");
     
@@ -44,6 +45,9 @@ private:
       Serial.println("Successfully parsed Format B: " + bleFormatB);
       printTimings("Format B", bleBTime);
     }
+    
+    // Parse isStopwatch
+    parseIsStopwatch(jsonData);
   }
   
   bool parseFormat(String jsonData, String formatKey, String &formatName, int timings[5][2]) {
@@ -128,6 +132,29 @@ private:
   
   String formatSecs(int secs) {
     return (secs < 10) ? ("0" + String(secs)) : String(secs);
+  }
+  
+  void parseIsStopwatch(String jsonData) {
+    String searchKey = "\"isStopwatch\":";
+    int keyStart = jsonData.indexOf(searchKey);
+    if (keyStart != -1) {
+      int valueStart = keyStart + searchKey.length();
+      
+      // skip whitespace
+      while (valueStart < jsonData.length() && (jsonData.charAt(valueStart) == ' ' || jsonData.charAt(valueStart) == '\t'))
+        valueStart++;
+      
+      // check value
+      if (jsonData.substring(valueStart, valueStart + 4).equals("true")) {
+        isStopwatch = true;
+        Serial.println("isStopwatch set to: true");
+      } else if (jsonData.substring(valueStart, valueStart + 5).equals("false")) {
+        isStopwatch = false;
+        Serial.println("isStopwatch set to: false");
+      } else
+        Serial.println("Could not parse isStopwatch value");
+    } else
+      Serial.println("isStopwatch field not found in JSON");
   }
 };
 
