@@ -170,8 +170,6 @@ void landingScreen() {
 }
 
 void landingScreenLogic() {
-  bool bluetoothStarted = false;
-
   while (true) {
     if (switchPressed) {
       turnOff();
@@ -179,12 +177,14 @@ void landingScreenLogic() {
     }
     if (programOff) return;
 
+    bool bluetoothActive = pAdvertising->isAdvertising() || pServer->getConnectedCount() > 0;
+
     if (digitalRead(buttonA) == LOW) {
       Serial.println("A pressed on landing screen");
       delay(300);
 
       // stop BLE advertising
-      if (bluetoothStarted) {
+      if (bluetoothActive) {
         pAdvertising->stop();
         Serial.println("BLE advertising stopped");
 
@@ -194,21 +194,25 @@ void landingScreenLogic() {
           Serial.println("BLE client disconnected by user");
         }
 
-        bluetoothStarted = false;
         blinkingBlue = false;
         setLEDColour(0, 0, 0);
       }
 
       return;
-    } else if (digitalRead(buttonB) == LOW && !bluetoothStarted) {
+    } else if (digitalRead(buttonB) == LOW && !bluetoothActive) {
       BLEDevice::getAdvertising()->start();
       delay(100);
       Serial.println("BLE advertising started from landing screen!");
-      bluetoothStarted = true;
       blinkingBlue = true;
     }
 
-    if (bluetoothStarted && blinkingBlue) LEDblink(0, 0, 255);
+    if ((pAdvertising->isAdvertising() && blinkingBlue) || (pServer->getConnectedCount() > 0 && !blinkingBlue)) {
+      if (pAdvertising->isAdvertising() && blinkingBlue) {
+        LEDblink(0, 0, 255);
+      } else if (pServer->getConnectedCount() > 0) {
+        setLEDColour(0, 0, 255);
+      }
+    }
   }
 }
 
@@ -260,9 +264,20 @@ void confirmationScreen() {
 
   // stopwatch
   display.setCursor(0, 0);
-  display.setTextSize(1);
-  display.print(" ");  // helps centre the numbers
-  headerPrintln("    " + selectedFormatName);
+  if (selectedFormatName.length() == 2 || selectedFormatName.length() == 4) {
+    display.setTextSize(1);
+    display.print(" ");  // helps centre the numbers
+    if (selectedFormatName.length() == 3)
+      display.print(" ");
+  }
+
+  display.setTextSize(2);
+  display.print("   ");
+  if (selectedFormatName.length() == 4)
+    display.print(selectedFormatName);
+  else
+    display.print(" " + selectedFormatName);
+  display.println();
 
   // format info
   textPrintln("");

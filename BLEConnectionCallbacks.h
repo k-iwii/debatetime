@@ -7,6 +7,7 @@
 // variables & functions defined in the main code
 extern bool blinkingBlue;
 extern void setLEDColour(int red, int green, int blue);
+extern BLEAdvertising* pAdvertising;
 
 class MyServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override {
@@ -20,7 +21,10 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
 
   void onDisconnect (NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override {
     Serial.println("BLE client disconnected!");
-    blinkingBlue = true;
+    blinkingBlue = false;
+    setLEDColour(0, 0, 0);
+    pAdvertising->stop();
+    Serial.println("BLE advertising stopped after disconnect");
   }
 };
 
