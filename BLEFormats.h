@@ -15,6 +15,7 @@ extern bool receivingChunkedData;
 extern String jsonBuffer;
 extern const int MAX_JSON_SIZE;
 extern const char* CHAR_DATA_UUID;
+extern NimBLECharacteristic* pCharData;
 
 class MyReceiveCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override {
@@ -98,6 +99,10 @@ private:
     
     // led colours
     parseColours(jsonData);
+
+    pCharData->setValue("PARSE_COMPLETE");
+    pCharData->notify();
+    Serial.println("notified");
   }
 
   // debate format

@@ -18,7 +18,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define LOGO_HEIGHT 16
 #define LOGO_WIDTH 16
 #define SERVICE_UUID "d4b24792-2610-4be4-97fa-945af5cf144e"  
-const char* CHAR_DATA_UUID = "d4b24793-2610-4be4-97fa-945af5cf144e";  // Single characteristic for Flutter app
+const char* CHAR_DATA_UUID = "d4b24793-2610-4be4-97fa-945af5cf144e";
 
 // input pins; all digital
 int buttonA = 5, buttonB = 6;
@@ -30,7 +30,7 @@ volatile bool switchPressed = false;  // flag to indicate switch turned off
 volatile bool programOff = false;
 void IRAM_ATTR switchISR() {
   switchPressed = true;
-  programOff = true;  // signal the whole program to stop
+  programOff = true;  // signal the program to stop
 }
 
 // variables
@@ -57,6 +57,7 @@ const int MAX_JSON_SIZE = 2048;
 // bluetooth
 BLEServer* pServer;
 BLEAdvertising* pAdvertising;
+NimBLECharacteristic* pCharData;
 
 // default settings
 String formatA = "BP"; // high school (5 minute speeches) british parliamentary
@@ -97,8 +98,8 @@ void setup() {
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService* pService = pServer->createService(SERVICE_UUID);
 
-  // Create single characteristic for Flutter app compatibility
-  NimBLECharacteristic* pCharData = pService->createCharacteristic(CHAR_DATA_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+  // characteristic receives data from flutter app
+  pCharData = pService->createCharacteristic(CHAR_DATA_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
   pCharData->setValue("ready");
 
   // Set callback
